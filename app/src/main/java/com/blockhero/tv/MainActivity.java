@@ -1,6 +1,8 @@
 package com.blockhero.tv;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
@@ -16,6 +18,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+
+import java.io.File;
 import android.widget.TextView;
 
 /** TV-remote / gamepad / keyboard controlled 3D platformer. */
@@ -25,6 +30,8 @@ public class MainActivity extends Activity {
     private Game game;
     private Sfx sfx;
     private TextView topText, centerText;
+    private ImageView titleImg;
+    private boolean onTitle, imageSet;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private String lastTop = "", lastCenter = "";
 
@@ -36,12 +43,14 @@ public class MainActivity extends Activity {
         sfx = new Sfx();
         game = new Game(sfx, new Game.Hud() {
             @Override
-            public void set(final String top, final String center) {
+            public void set(final String top, final String center, final boolean title) {
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
                         if (!top.equals(lastTop)) { lastTop = top; topText.setText(top); }
                         if (!center.equals(lastCenter)) { lastCenter = center; centerText.setText(center); }
+                        onTitle = title;
+                        updateTitleImage();
                     }
                 });
             }
@@ -66,6 +75,12 @@ public class MainActivity extends Activity {
         root.addView(glView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        titleImg = new ImageView(this);
+        titleImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        titleImg.setVisibility(View.GONE);
+        root.addView(titleImg, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
         topText = makeText(20, Gravity.START | Gravity.TOP);
         centerText = makeText(34, Gravity.CENTER);
         root.addView(topText, new FrameLayout.LayoutParams(
@@ -73,6 +88,50 @@ public class MainActivity extends Activity {
         root.addView(centerText, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
         setContentView(root);
+
+        // Use cached downloads right away, then fetch whatever is still missing (needs internet).
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                File d = Assets.dir(MainActivity.this);
+                applyAssets(d);
+                Assets.fetchMissing(d);
+                applyAssets(d);
+            }
+        }).start();
+    }
+
+    private void applyAssets(File d) {
+        sfx.loadRemote(d);
+        if (imageSet) return;
+        File f = new File(d, Assets.TITLE_IMAGE);
+        if (!f.exists()) return;
+        try {
+            // decode at roughly 1280 px wide to keep RAM low
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), o);
+            int sample = 1;
+            while (o.outWidth / (sample * 2) >= 1280) sample *= 2;
+            o = new BitmapFactory.Options();
+            o.inSampleSize = sample;
+            o.inPreferredConfig = Bitmap.Config.RGB_565;
+            final Bitmap bm = BitmapFactory.decodeFile(f.getPath(), o);
+            if (bm == null) return;
+            ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    titleImg.setImageBitmap(bm);
+                    imageSet = true;
+                    updateTitleImage();
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void updateTitleImage() {
+        titleImg.setVisibility(onTitle && imageSet ? View.VISIBLE : View.GONE);
     }
 
     private TextView makeText(int sp, int gravity) {
@@ -112,6 +171,7 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) { game.kLeft = game.kRight = game.kDown = game.kJump = false; }
         if (hasFocus) {
             getWindow().getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -125,10 +185,6 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
         switch (code) {
-            case KeyEvent.KEYCODE_DPAD_UP:
-            case KeyEvent.KEYCODE_W:
-                game.kUp = true;
-                return true;
             case KeyEvent.KEYCODE_DPAD_DOWN:
             case KeyEvent.KEYCODE_S:
                 game.kDown = true;
@@ -141,6 +197,8 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_D:
                 game.kRight = true;
                 return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_W:
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER:
@@ -172,10 +230,6 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyUp(int code, KeyEvent e) {
         switch (code) {
-            case KeyEvent.KEYCODE_DPAD_UP:
-            case KeyEvent.KEYCODE_W:
-                game.kUp = false;
-                return true;
             case KeyEvent.KEYCODE_DPAD_DOWN:
             case KeyEvent.KEYCODE_S:
                 game.kDown = false;
@@ -188,6 +242,8 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_D:
                 game.kRight = false;
                 return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_W:
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER:

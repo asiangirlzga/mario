@@ -18,12 +18,12 @@ import javax.microedition.khronos.opengles.GL10;
  */
 final class Game implements GLSurfaceView.Renderer {
 
-    interface Hud { void set(String top, String center); }
+    interface Hud { void set(String top, String center, boolean title); }
 
     static final int TITLE = 0, PLAY = 1, PAUSE = 2, CLEAR = 3, OVER = 4, WIN = 5;
 
     private static final float HX = 0.3f, HH = 1.25f;
-    private static final float GRAV = -30f, JUMP = 12f, RUN = 6.5f;
+    private static final float GRAV = -30f, JUMP = 12f, RUN = 5.8f;
     private static final float ENEMY_H = 0.95f;
 
     // ------------------------------------------------------- input (UI thread)
@@ -139,7 +139,7 @@ final class Game implements GLSurfaceView.Renderer {
     @Override
     public void onSurfaceChanged(GL10 unused, int w, int h) {
         GLES20.glViewport(0, 0, w, h);
-        Matrix.perspectiveM(mProj, 0, 55f, w / (float) Math.max(1, h), 2f, 110f);
+        Matrix.perspectiveM(mProj, 0, 35f, w / (float) Math.max(1, h), 2f, 170f);
     }
 
     @Override
@@ -344,13 +344,14 @@ final class Game implements GLSurfaceView.Renderer {
             px += ground.dx; py += ground.dy; pz += ground.dz;
         }
 
-        // ---- input -> velocity (screen right is world -X because we look down +Z)
-        float ix = (kLeft ? 1f : 0f) - (kRight ? 1f : 0f) - axX;
-        float iz = (kUp ? 1f : 0f) - (kDown ? 1f : 0f) - axY;
-        float len = (float) Math.sqrt(ix * ix + iz * iz);
-        if (len > 1f) { ix /= len; iz /= len; }
+        // ---- 2D: the hero auto-runs to the right (+z). LEFT/DOWN = stop, RIGHT = sprint.
+        float ix = 0f;
+        boolean stop = kLeft || kDown || axX < -0.5f || axY > 0.5f;
+        boolean sprint = kRight || axX > 0.5f;
+        float iz = stop ? 0f : (sprint ? 1.3f : 1f);
+        float len = iz;
         float acc = onGround ? 70f : 40f;
-        vx = approach(vx, ix * RUN, acc * h);
+        vx = 0f;
         vz = approach(vz, iz * RUN, acc * h);
         if (len > 0.1f) {
             float target = (float) Math.atan2(ix, iz);
@@ -370,7 +371,6 @@ final class Game implements GLSurfaceView.Renderer {
             sfx.play(Sfx.JUMP);
         }
         vy += GRAV * h;
-        if (!kJump && vy > 3f) vy -= 60f * h;
         if (vy < -26f) vy = -26f;
 
         // ---- move + collide, one axis at a time
@@ -381,6 +381,7 @@ final class Game implements GLSurfaceView.Renderer {
         pushOutHorizontal(true);
         pz += vz * h;
         pushOutHorizontal(false);
+        px = 0f;
         py += vy * h;
         pushOutVertical();
         if (onGround && !wasGround && vyPre < -6f) sq = -0.28f;
@@ -412,7 +413,7 @@ final class Game implements GLSurfaceView.Renderer {
                     && py < e.y + ENEMY_H && py + HH > e.y) {
                 if (vy < 0 && py > e.y + 0.45f) {
                     e.squash = 0.001f;
-                    vy = kJump ? 13.5f : 9.5f;
+                    vy = 11f;
                     score += 100;
                     sq = 0.2f;
                     sfx.play(Sfx.STOMP);
@@ -529,8 +530,8 @@ final class Game implements GLSurfaceView.Renderer {
         }
         switch (state) {
             case TITLE:
-                mid = "BLOCK HERO 3D\n\nPress OK to start\n\nD-pad: move     OK: jump (hold for higher)\n"
-                        + "Stomp the mushrooms, grab coins, reach the flag!";
+                mid = "BLOCK HERO 3D\n\nPress OK to start\n\nOK or UP: jump     RIGHT: sprint     LEFT or DOWN: stop\n"
+                        + "The hero runs to the right by itself. Stomp the mushrooms, grab coins, reach the flag!";
                 break;
             case PAUSE:
                 mid = "PAUSED\n\nOK: resume     BACK: quit";
@@ -548,7 +549,7 @@ final class Game implements GLSurfaceView.Renderer {
                 if (msgT > 0) mid = msg;
                 break;
         }
-        hud.set(top, mid);
+        hud.set(top, mid, state == TITLE);
     }
 
     // ============================================================== rendering
@@ -593,8 +594,8 @@ final class Game implements GLSurfaceView.Renderer {
         GLES20.glClearColor(sky[0], sky[1], sky[2], 1f);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        float ox = state == TITLE ? (float) Math.sin(time * 0.5f) * 5f : 0f;
-        Matrix.setLookAtM(mView, 0, camX + ox, camY + 5.0f, camZ - 9.0f, camX, camY + 1.2f, camZ + 4.0f, 0f, 1f, 0f);
+        float sway = state == TITLE ? (float) Math.sin(time * 0.5f) * 3f : 0f;
+        Matrix.setLookAtM(mView, 0, -20f, camY + 4.5f, camZ + sway, 0f, camY + 1.8f, camZ + 3.5f + sway, 0f, 1f, 0f);
         Matrix.multiplyMM(mVP, 0, mProj, 0, mView, 0);
 
         GLES20.glUseProgram(prog);
@@ -604,9 +605,9 @@ final class Game implements GLSurfaceView.Renderer {
         GLES20.glEnableVertexAttribArray(aNorm);
         GLES20.glVertexAttribPointer(aNorm, 3, GLES20.GL_FLOAT, false, 24, 12);
         GLES20.glUniform3f(uFogC, sky[0], sky[1], sky[2]);
-        GLES20.glUniform2f(uFog, 38f, 95f);
+        GLES20.glUniform2f(uFog, 45f, 130f);
 
-        float zMin = camZ - 14f, zMax = camZ + 95f;
+        float zMin = camZ - 45f, zMax = camZ + 45f;
 
         for (Level.Box b : lv.boxes) {
             if (b.z1 < zMin || b.z0 > zMax) continue;
@@ -614,7 +615,7 @@ final class Game implements GLSurfaceView.Renderer {
                     b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0, 0f, b.top, b.side);
         }
         for (Level.Decor d : lv.decor) {
-            if (d.z < zMin - 12f || d.z > zMax + 10f) continue;
+            if (d.z < zMin - 30f || d.z > zMax + 30f) continue;
             drawDecor(d);
         }
         for (Level.Coin c : lv.coins) {
@@ -628,7 +629,7 @@ final class Game implements GLSurfaceView.Renderer {
         for (Level.Post p : lv.posts) {
             if (p.z < zMin || p.z > zMax) continue;
             box(p.x, p.y + 1.1f, p.z, 0.12f, 2.2f, 0.12f, 0f, WHITE, WHITE);
-            box(p.x + 0.4f, p.y + 1.9f, p.z, 0.7f, 0.45f, 0.05f, 0f, p.reached ? GREEN : RED, p.reached ? GREEN : RED);
+            box(p.x, p.y + 1.9f, p.z + 0.4f, 0.05f, 0.45f, 0.7f, 0f, p.reached ? GREEN : RED, p.reached ? GREEN : RED);
         }
         drawGoal();
 
@@ -700,19 +701,20 @@ final class Game implements GLSurfaceView.Renderer {
 
     private void drawGoal() {
         float gx = lv.goalX, gy = lv.goalY, gz = lv.goalZ;
-        if (gz < camZ - 14f || gz > camZ + 95f) return;
+        if (gz < camZ - 45f || gz > camZ + 45f) return;
         box(gx, gy + 0.3f, gz, 1.2f, 0.6f, 1.2f, 0f, GREY, GREY);
         box(gx, gy + 2.7f, gz, 0.16f, 4.8f, 0.16f, 0f, WHITE, WHITE);
         box(gx, gy + 5.2f, gz, 0.4f, 0.4f, 0.4f, 0f, GOLD, GOLD);
-        box(gx + 0.7f + (float) Math.sin(time * 4f) * 0.08f, gy + 4.4f, gz, 1.3f, 0.8f, 0.06f, 0f, GREEN, GREEN);
-        // little castle behind the flag
-        box(gx, gy + 1.8f, gz + 5f, 5f, 3.6f, 3f, 0f, CASTLE, CASTLE);
-        box(gx - 2f, gy + 4.0f, gz + 5f, 1f, 0.8f, 3f, 0f, CASTLE, CASTLE);
-        box(gx, gy + 4.0f, gz + 5f, 1f, 0.8f, 3f, 0f, CASTLE, CASTLE);
-        box(gx + 2f, gy + 4.0f, gz + 5f, 1f, 0.8f, 3f, 0f, CASTLE, CASTLE);
-        box(gx, gy + 1.0f, gz + 3.45f, 1.3f, 2.0f, 0.1f, 0f, DOOR, DOOR);
-        box(gx, gy + 4.9f, gz + 5f, 0.12f, 1.2f, 0.12f, 0f, WHITE, WHITE);
-        box(gx + 0.45f, gy + 5.3f, gz + 5f, 0.8f, 0.4f, 0.05f, 0f, RED, RED);
+        box(gx, gy + 4.4f, gz + 0.7f + (float) Math.sin(time * 4f) * 0.08f, 0.06f, 0.8f, 1.3f, 0f, GREEN, GREEN);
+        // little castle behind and to the right of the flag (door faces the camera)
+        float cx = gx + 3.5f, cz = gz + 5f;
+        box(cx, gy + 1.8f, cz, 3f, 3.6f, 5f, 0f, CASTLE, CASTLE);
+        box(cx, gy + 4.0f, cz - 2f, 3f, 0.8f, 1f, 0f, CASTLE, CASTLE);
+        box(cx, gy + 4.0f, cz, 3f, 0.8f, 1f, 0f, CASTLE, CASTLE);
+        box(cx, gy + 4.0f, cz + 2f, 3f, 0.8f, 1f, 0f, CASTLE, CASTLE);
+        box(cx - 1.55f, gy + 1.0f, cz, 0.1f, 2.0f, 1.3f, 0f, DOOR, DOOR);
+        box(cx, gy + 4.9f, cz, 0.12f, 1.2f, 0.12f, 0f, WHITE, WHITE);
+        box(cx, gy + 5.3f, cz + 0.45f, 0.05f, 0.4f, 0.8f, 0f, RED, RED);
     }
 
     private void drawDecor(Level.Decor d) {

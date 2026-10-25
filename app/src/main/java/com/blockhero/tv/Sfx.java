@@ -3,6 +3,10 @@ package com.blockhero.tv;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.media.MediaPlayer;
+import android.media.SoundPool;
+
+import java.io.File;
 
 /** Tiny chiptune sound effects + music, synthesised at start-up (no audio files, ~200 KB RAM). */
 final class Sfx {
@@ -12,6 +16,9 @@ final class Sfx {
     private final AudioTrack[] fx = new AudioTrack[COUNT];
     private AudioTrack music;
     private boolean musicPlaying;
+    private SoundPool pool;
+    private final int[] poolIds = new int[COUNT];
+    private MediaPlayer mp;
 
     Sfx() {
         try {
@@ -27,10 +34,14 @@ final class Sfx {
         }
     }
 
-    void play(int id) {
-        AudioTrack a = fx[id];
-        if (a == null) return;
+    synchronized void play(int id) {
         try {
+            if (pool != null && poolIds[id] > 0) {
+                pool.play(poolIds[id], 1f, 1f, 1, 0, 1f);
+                return;
+            }
+            AudioTrack a = fx[id];
+            if (a == null) return;
             a.stop();
             a.reloadStaticData();
             a.play();
@@ -38,17 +49,53 @@ final class Sfx {
         }
     }
 
-    void music(boolean on) {
-        if (music == null || on == musicPlaying) return;
+    synchronized void music(boolean on) {
+        if (on == musicPlaying) return;
+        musicPlaying = on;
         try {
-            if (on) music.play(); else music.pause();
-            musicPlaying = on;
+            if (mp != null) {
+                if (on) mp.start(); else mp.pause();
+            } else if (music != null) {
+                if (on) music.play(); else music.pause();
+            }
         } catch (Throwable ignored) {
         }
     }
 
-    void release() {
+    /** Use downloaded files (if present in dir) instead of the built-in synthesised sounds. */
+    synchronized void loadRemote(File dir) {
         try {
+            File m = new File(dir, Assets.MUSIC);
+            if (mp == null && m.exists()) {
+                MediaPlayer p = new MediaPlayer();
+                p.setDataSource(m.getPath());
+                p.setLooping(true);
+                p.setVolume(0.6f, 0.6f);
+                p.prepare();
+                mp = p;
+                if (musicPlaying) {
+                    if (music != null) music.pause();
+                    mp.start();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            for (int i = 0; i < COUNT; i++) {
+                File f = new File(dir, Assets.FX[i]);
+                if (poolIds[i] == 0 && f.exists()) {
+                    if (pool == null) pool = new SoundPool(4, AudioManager.STREAM_MUSIC, 0);
+                    poolIds[i] = pool.load(f.getPath(), 1);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    synchronized void release() {
+        try {
+            if (mp != null) mp.release();
+            if (pool != null) pool.release();
             for (AudioTrack a : fx) if (a != null) a.release();
             if (music != null) music.release();
         } catch (Throwable ignored) {

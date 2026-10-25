@@ -75,6 +75,7 @@ final class Level {
         if (i == 0) l.level0();
         else if (i == 1) l.level1();
         else l.level2();
+        l.flatten();
         l.finish(i);
         return l;
     }
@@ -301,19 +302,49 @@ final class Level {
         endZ = z;
     }
 
+    // ------------------------------------------------------- 2D side-scroller
+
+    /** Squash the 3D layout onto one lane: progress runs along +z (screen right), lateral x is dropped. */
+    private void flatten() {
+        for (Box b : boxes) {
+            if (b.axis == 0) {                       // sideways movers become back-and-forth movers
+                b.axis = 2; b.amp = 1.2f; b.prev = (float) Math.sin(b.ph) * b.amp;
+            }
+            b.x0 = -1.5f; b.x1 = 8f;                 // slab: front face at x=-1.5, scenery stands on the back part
+        }
+        for (Box b : boxes) {
+            if (b.axis == 2 && b.amp == 1.2f) b.shift(2, b.prev);
+        }
+        for (Enemy e : enemies) {
+            if (e.axis == 0) { float c = e.z; e.axis = 2; e.min = c - 1.8f; e.max = c + 1.8f; }
+            float mid = (e.min + e.max) * 0.5f;
+            for (Box b : boxes) {
+                if (b.axis < 0 && Math.abs(b.y1 - e.y) < 0.01f && mid > b.z0 && mid < b.z1) {
+                    e.min = Math.max(e.min, b.z0 + 1.5f);
+                    e.max = Math.min(e.max, b.z1 - 3.5f);   // keep clear of the edge: a stomp bounce must not drop you in the pit
+                    if (e.max - e.min < 1f) { e.min = b.z0 + 1.5f; e.max = Math.max(e.min + 1f, b.z1 - 3.5f); }
+                    break;
+                }
+            }
+            e.x = 0; e.z = e.min; e.dir = 1;
+        }
+        for (Coin c : coins) c.x = 0;
+        for (Post p : posts) p.x = 0;
+        goalX = 0;
+        startX = 0;
+    }
+
     // ------------------------------------------------------------- decoration
 
     private void finish(int idx) {
         Random r = new Random(idx * 7919L + 13);
         for (Box b : boxes) {
             if (b.axis >= 0) continue;
-            float w = b.x1 - b.x0;
-            if (w < 9f) continue;
-            for (float zz = b.z0 + 2.5f; zz < b.z1 - 1.5f; zz += 5f + r.nextFloat() * 4f) {
+            if (b.z1 - b.z0 < 6f) continue;
+            for (float zz = b.z0 + 2.5f; zz < b.z1 - 1.5f; zz += 4f + r.nextFloat() * 4f) {
                 if (r.nextInt(3) == 0) continue;
-                float sd = r.nextBoolean() ? 1f : -1f;
                 Decor d = new Decor();
-                d.x = (b.x0 + b.x1) / 2 + sd * (w / 2 - 0.9f);
+                d.x = 2.5f + r.nextFloat() * 4f;
                 d.y = b.y1; d.z = zz; d.s = 0.8f + r.nextFloat() * 0.6f;
                 if (style == 0) d.kind = r.nextInt(3) == 0 ? BUSH : TREE;
                 else if (style == 1) d.kind = r.nextInt(3) == 0 ? ROCK : CACTUS;
@@ -321,17 +352,15 @@ final class Level {
                 decor.add(d);
             }
         }
-        for (float zz = -20f; zz < endZ + 70f; zz += 36f) {
-            for (int s = -1; s <= 1; s += 2) {
-                Decor d = new Decor();
-                d.kind = MOUNTAIN; d.x = s * (52f + r.nextFloat() * 22f); d.y = -10f; d.z = zz + r.nextFloat() * 14f;
-                d.s = 1.0f + r.nextFloat() * 0.8f;
-                decor.add(d);
-            }
-        }
-        for (float zz = -10f; zz < endZ + 50f; zz += 20f) {
+        for (float zz = -40f; zz < endZ + 80f; zz += 30f) {
             Decor d = new Decor();
-            d.kind = CLOUD; d.x = r.nextFloat() * 90f - 45f; d.y = 14f + r.nextFloat() * 9f; d.z = zz + r.nextFloat() * 10f;
+            d.kind = MOUNTAIN; d.x = 45f + r.nextFloat() * 20f; d.y = -12f; d.z = zz + r.nextFloat() * 10f;
+            d.s = 0.9f + r.nextFloat() * 0.7f;
+            decor.add(d);
+        }
+        for (float zz = -30f; zz < endZ + 70f; zz += 14f) {
+            Decor d = new Decor();
+            d.kind = CLOUD; d.x = 20f + r.nextFloat() * 25f; d.y = 7f + r.nextFloat() * 9f; d.z = zz + r.nextFloat() * 8f;
             d.s = 0.8f + r.nextFloat();
             decor.add(d);
         }
